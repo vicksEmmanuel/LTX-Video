@@ -3,6 +3,7 @@ import os
 import random
 from datetime import datetime
 from pathlib import Path
+import uuid
 from diffusers.utils import logging
 from typing import Optional, List, Union
 import yaml
@@ -166,7 +167,7 @@ def get_unique_filename(
     endswith=None,
     index_range=1000,
 ) -> Path:
-    base_filename = f"{base}_{convert_prompt_to_filename(prompt, max_len=30)}_{seed}_{resolution[0]}x{resolution[1]}x{resolution[2]}"
+    base_filename = f"{base}_{convert_prompt_to_filename(prompt, max_len=30)}_{seed}_{resolution[0]}x{resolution[1]}x{resolution[2]}_{uuid.uuid4().__str__()}"
     for i in range(index_range):
         filename = dir / f"{base_filename}_{i}{endswith if endswith else ''}{ext}"
         if not os.path.exists(filename):
@@ -667,6 +668,8 @@ def infer(
                     video.append_data(frame)
 
         logger.warning(f"Output saved to {output_filename}")
+
+    return output_filename
 
 
 def prepare_conditioning(
