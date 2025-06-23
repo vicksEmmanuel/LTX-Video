@@ -312,7 +312,17 @@ def initialize_pipeline(pipeline_config_path: str = "ltx_video/configs/ltxv-13b-
                 "spatial upscaler model path is missing from pipeline config file and is required for multi-scale rendering"
             )
         LATENT_UPSAMPLER = create_latent_upsampler(spatial_upscaler_model_path, device)
-        PIPELINE = LTXMultiScalePipeline(PIPELINE, latent_upsampler=LATENT_UPSAMPLER)
+        try:
+            PIPELINE = LTXMultiScalePipeline(base_pipeline=PIPELINE, latent_upsampler=LATENT_UPSAMPLER)
+            # Explicitly move the underlying pipeline and upsampler to the device
+            PIPELINE.base_pipeline.to(device)
+            PIPELINE.latent_upsampler.to(device)
+        except TypeError as e:
+            logger.warning(
+                f"Failed to initialize LTXMultiScalePipeline with base_pipeline: {e}. Falling back to LTXVideoPipeline."
+            )
+            PIPELINE = PIPELINE  # Keep the original LTXVideoPipeline
+            LATENT_UPSAMPLER = None  # Clear upsampler if not used
 
 def infer(
     output_path: Optional[str],
@@ -340,7 +350,7 @@ def infer(
     if kwargs.get("input_image_path"):
         logger.warning("Please use conditioning_media_paths instead of input_image_path.")
         assert not conditioning_media_paths and not conditioning_start_frames
-        conditioning_media_paths = [kwargs["global PIPELINE_CONFIGinput_image_path"]]
+        conditioning_media_paths = [kwargs["input_image_path"]]
         conditioning_start_frames = [0]
 
     # Validate conditioning arguments
@@ -405,11 +415,16 @@ def infer(
             f"Prompt has {prompt_word_count} words, which exceeds the threshold of {prompt_enhancement_words_threshold}. Prompt enhancement disabled."
         )
 
-    # Move pipeline to the specified device if different from current device
-    if str(PIPELINE.device) != device:
-        PIPELINE = PIPELINE.to(device)
-        if LATENT_UPSAMPLER is not None:
-            LATENT_UPSAMPLER = LATENT_UPSAMPLER.to(device)
+    # Move pipeline components to the specified device if necessary
+    if isinstance(PIPELINE, LTXMultiScalePipeline):
+        pipeline_device = str(PIPELINE.base_pipeline.device)
+        if pipeline_device != device:
+            PIPELINE.base_pipeline.to(device)
+            PIPELINE.latent_upsampler.to(device)
+    else:
+        pipeline_device = str(PIPELINE.device)
+        if pipeline_device != device:
+            PIPELINE.to(device)
 
     media_item = None
     if input_media_path:
@@ -430,7 +445,7 @@ def infer(
             width=width,
             num_frames=num_frames,
             padding=padding,
-            pipeline=PIPELINE,
+            pipeline=PIPELINE if isinstance(PIPELINE, LTXVideoPipeline) else PIPELINE.base_pipeline,
         )
         if conditioning_media_paths
         else None
@@ -696,7 +711,5 @@ def main():
     args = parser.parse_args()
     logger.warning(f"Running generation with arguments: {args}")
     initialize_pipeline(args.pipeline_config)
-    infer(**vars(args))
 
-if __name__ == "__main__":
-    main()
+main()
